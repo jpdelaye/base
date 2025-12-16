@@ -1,43 +1,48 @@
-# Usa la imagen base oficial de OpenLiteSpeed con PHP 8.1
-FROM litespeedtech/openlitespeed:2.0.1-lsphp81
+# ---------- builder ----------
+FROM composer:2 AS builder
+WORKDIR /app
 
-LABEL maintainer="Mantenedor"
+# 1) Crear CI4 AppStarter
+RUN composer create-project codeigniter4/appstarter . --no-dev --prefer-dist
 
-# Instalación de herramientas básicas y dependencias de PHP
-RUN apt-get update && \
-    apt-get install -y \
-        git \
-        curl \
-        unzip \
-        nano \
-        libzip-dev \
-        libpng-dev \
-        libjpeg-dev \
-        libonig-dev && \
-    rm -rf /var/lib/apt/lists/*
+# 2) Instalar Shield
+RUN composer require codeigniter4/shield --no-interaction --no-progress
 
-# 1. Configurar y activar extensiones PHP comunes (ej. GD, Zip, Pdo-Mysql)
-# El script lsphp_ext.sh facilita la instalación de extensiones PECL/natvas
-RUN /usr/local/lsws/lsphp81/bin/pecl install redis && \
-    /usr/local/lsws/lsphp81/bin/pecl install imagick && \
-    /usr/local/lsws/lsphp81/bin/phpize && \
-    docker-php-ext-install \
-        zip \
-        gd \
-        exif \
-        pdo_mysql \
-        mysqli
+# 3) Publicar archivos de Shield (si el comando cambia según versión, hacemos fallback)
+RUN php spark shield:publish || php spark publish --namespace CodeIgniter\\Shield
 
-# 2. Habilitar las extensiones en el php.ini
-RUN echo "extension=redis.so" >> /usr/local/lsws/lsphp81/etc/php/8.1/litespeed/php.ini && \
-    echo "extension=imagick.so" >> /usr/local/lsws/lsphp81/etc/php/8.1/litespeed/php.ini
+# 4) Copiar overlay (multi-tenant + migraciones + filtros)
+COPY docker/app-overlay/ /app/
 
-# 3. Configuraciones específicas de OpenLiteSpeed
-# Configuramos el virtual host por defecto para que apunte a /var/www/html (opcional)
-# Aunque la imagen base ya configura /var/www/vhosts/localhost/html
+# Optimizar autoloader
+RUN composer dump-autoload -o
 
-# Exponer los puertos (ya están expuestos en la imagen base, pero se recomienda)
-EXPOSE 80 443 7080
 
-# Comando por defecto (la imagen base ya lo tiene)
-CMD ["/usr/local/lsws/bin/litespeed", "-D"]
+# ---------- runtime ----------
+FROM php:8.3-apache
+WORKDIR /var/www/html
+
+# Extensiones comunes CI4 + MySQL
+RUN apt-get update && apt-get install -y \
+    libicu-dev libzip-dev unzip \
+  && docker-php-ext-install intl mysqli pdo_mysql zip \
+  && a2enmod rewrite headers \
+  && rm -rf /var/lib/apt/lists/*
+
+# Apache: DocumentRoot a /public
+COPY docker/apache/000-default.conf /etc/apache2/sites-available/000-default.conf
+
+# App
+COPY --from=builder /app/ /var/www/html/
+
+# Permisos para writable
+RUN chown -R www-data:www-data /var/www/html/writable /var/www/html/public
+
+# Entrypoint (migraciones al arrancar)
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["apache2-foreground"]
+
+
