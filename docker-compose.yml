@@ -1,0 +1,72 @@
+version: "3.8"
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      CI_ENVIRONMENT: production
+
+      # App / dominios
+      APP_PRIMARY_DOMAIN: ${APP_PRIMARY_DOMAIN}
+      APP_ALLOWED_HOSTNAMES: ${APP_ALLOWED_HOSTNAMES}
+
+      # DB
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+
+    depends_on:
+      - db
+    networks:
+      - dokploy-network
+    expose:
+      - "80"
+    labels:
+      - "traefik.enable=true"
+      # Si vas a tener MUCHOS dominios: mejor agrégalos en Dokploy > Domains (recomendado).
+      - "traefik.http.routers.ci4.rule=Host(`${APP_PRIMARY_DOMAIN}`)"
+      - "traefik.http.routers.ci4.entrypoints=websecure"
+      - "traefik.http.routers.ci4.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ci4.loadbalancer.server.port=80"
+
+  db:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${DB_NAME}
+      MARIADB_USER: ${DB_USER}
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - dokploy-network
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    restart: unless-stopped
+    environment:
+      PMA_HOST: db
+      PMA_PORT: 3306
+      PMA_ARBITRARY: 1
+      UPLOAD_LIMIT: 256M
+    networks:
+      - dokploy-network
+    expose:
+      - "80"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pma.rule=Host(`${PMA_DOMAIN}`)"
+      - "traefik.http.routers.pma.entrypoints=websecure"
+      - "traefik.http.routers.pma.tls.certresolver=letsencrypt"
+      - "traefik.http.services.pma.loadbalancer.server.port=80"
+
+volumes:
+  db_data: {}
+
+networks:
+  dokploy-network:
+    external: true
