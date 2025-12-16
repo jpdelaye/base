@@ -1,73 +1,73 @@
-version: '3.8'
+version: "3.8"
 
 services:
-  # 1. Servicio Web/PHP (OpenLiteSpeed + PHP)
-  openlitespeed:
-    # Usaremos una imagen de OpenLiteSpeed con PHP integrado (de LiteSpeed Tech)
-    image: litespeedtech/openlitespeed:latest
-    container_name: openlitespeed_web
-    restart: always
-    ports:
-      # Puerto para el tráfico HTTP (web)
-      - "80:80"
-      # Puerto para el tráfico HTTPS (web)
-      - "443:443"
-      # Puerto del Panel de Administración de OpenLiteSpeed (IMPORTANTE: Cambiar la contraseña por defecto)
-      - "7080:7080"
-    volumes:
-      # Monta los archivos de configuración de OLS (si los tienes)
-      - ./conf:/usr/local/lsws/conf
-      # Monta la carpeta de tus sitios web
-      - ./html:/var/www/vhosts/localhost/html
-      # Archivos de registro
-      - ./logs:/usr/local/lsws/logs
+  app:
+    build: .
+    restart: unless-stopped
     environment:
-      # Establece la versión de PHP (OLS generalmente usa lsphp)
-      # Puedes ajustar esto según la imagen que uses
-      PHP_VER: 74 # O 80, 81, etc.
+      CI_ENVIRONMENT: production
+
+      # App / dominios
+      APP_PRIMARY_DOMAIN: ${APP_PRIMARY_DOMAIN}
+      APP_ALLOWED_HOSTNAMES: ${APP_ALLOWED_HOSTNAMES}
+
+      # DB
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+
     depends_on:
-      - mariadb
+      - db
+    networks:
+      - dokploy-network
+    expose:
+      - "80"
+    labels:
+      - "traefik.enable=true"
+      # Si vas a tener MUCHOS dominios: mejor agrégalos en Dokploy > Domains (recomendado).
+      - "traefik.http.routers.ci4.rule=Host(`${APP_PRIMARY_DOMAIN}`)"
+      - "traefik.http.routers.ci4.entrypoints=websecure"
+      - "traefik.http.routers.ci4.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ci4.loadbalancer.server.port=80"
 
-  # 2. Servicio de Base de Datos (MariaDB)
-  mariadb:
-    image: mariadb:latest
-    container_name: mariadb_db
-    restart: always
-    # Expone el puerto, aunque solo lo usaremos internamente con phpMyAdmin
-    ports:
-      - "3306:3306" 
-    volumes:
-      # Persistencia de los datos de la base de datos
-      - ./data/mariadb:/var/lib/mysql
+  db:
+    image: mariadb:11.4
+    restart: unless-stopped
     environment:
-      # --- VARIABLES REQUERIDAS ---
-      # ¡IMPORTANTE! Cambia esta contraseña por una segura
-      MARIADB_ROOT_PASSWORD: my_strong_root_password
-      MARIADB_DATABASE: my_database
-      MARIADB_USER: my_db_user
-      MARIADB_PASSWORD: my_db_password
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${DB_NAME}
+      MARIADB_USER: ${DB_USER}
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - dokploy-network
 
-  # 3. Herramienta de Gestión de Base de Datos (phpMyAdmin)
   phpmyadmin:
-    image: phpmyadmin/phpmyadmin:latest
-    container_name: phpmyadmin_tool
-    restart: always
-    ports:
-      # Acceso web a phpMyAdmin
-      - "8080:80"
+    image: phpmyadmin:latest
+    restart: unless-stopped
     environment:
-      # Host de la base de datos (nombre del servicio en docker-compose)
-      PMA_HOST: mariadb
-      # Puerto de la base de datos
+      PMA_HOST: db
       PMA_PORT: 3306
-      # Evita la advertencia del check de setup
       PMA_ARBITRARY: 1
-    depends_on:
-      - mariadb
+      UPLOAD_LIMIT: 256M
+    networks:
+      - dokploy-network
+    expose:
+      - "80"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pma.rule=Host(`${PMA_DOMAIN}`)"
+      - "traefik.http.routers.pma.entrypoints=websecure"
+      - "traefik.http.routers.pma.tls.certresolver=letsencrypt"
+      - "traefik.http.services.pma.loadbalancer.server.port=80"
 
-# Define los volúmenes para persistir datos fuera de los contenedores
 volumes:
-  conf:
-  html:
-  logs:
-  data:
+  db_data: {}
+
+networks:
+  dokploy-network:
+    external: true
+
