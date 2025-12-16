@@ -1,8 +1,1 @@
-.git
-.env
-writable/*
-!writable/.gitkeep
-vendor
-node_modules
-tests
-*.log
+
