@@ -1,37 +1,43 @@
-# ---------- Stage 1: Composer ----------
-FROM composer:2 AS vendor
-WORKDIR /app
-RUN composer install --no-dev --prefer-dist --no-interaction --no-progress --optimize-autoloader
+# Usa la imagen base oficial de OpenLiteSpeed con PHP 8.1
+FROM litespeedtech/openlitespeed:2.0.1-lsphp81
 
-# ---------- Stage 2: PHP + Apache ----------
-FROM php:8.3-apache
+LABEL maintainer="Tu Nombre"
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libzip-dev zip unzip \
-  && docker-php-ext-install pdo pdo_mysql mysqli \
-  && a2enmod rewrite headers \
-  && rm -rf /var/lib/apt/lists/*
+# Instalación de herramientas básicas y dependencias de PHP
+RUN apt-get update && \
+    apt-get install -y \
+        git \
+        curl \
+        unzip \
+        nano \
+        libzip-dev \
+        libpng-dev \
+        libjpeg-dev \
+        libonig-dev && \
+    rm -rf /var/lib/apt/lists/*
 
-# CI4: document root /public
-ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
-RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf \
- && sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
+# 1. Configurar y activar extensiones PHP comunes (ej. GD, Zip, Pdo-Mysql)
+# El script lsphp_ext.sh facilita la instalación de extensiones PECL/natvas
+RUN /usr/local/lsws/lsphp81/bin/pecl install redis && \
+    /usr/local/lsws/lsphp81/bin/pecl install imagick && \
+    /usr/local/lsws/lsphp81/bin/phpize && \
+    docker-php-ext-install \
+        zip \
+        gd \
+        exif \
+        pdo_mysql \
+        mysqli
 
-# límites (ajusta si quieres)
-RUN { \
-  echo "upload_max_filesize=64M"; \
-  echo "post_max_size=64M"; \
-  echo "memory_limit=256M"; \
-  echo "max_execution_time=120"; \
-} > /usr/local/etc/php/conf.d/uploads.ini
+# 2. Habilitar las extensiones en el php.ini
+RUN echo "extension=redis.so" >> /usr/local/lsws/lsphp81/etc/php/8.1/litespeed/php.ini && \
+    echo "extension=imagick.so" >> /usr/local/lsws/lsphp81/etc/php/8.1/litespeed/php.ini
 
-WORKDIR /var/www/html
-COPY . /var/www/html
-COPY --from=vendor /app/vendor /var/www/html/vendor
+# 3. Configuraciones específicas de OpenLiteSpeed
+# Configuramos el virtual host por defecto para que apunte a /var/www/html (opcional)
+# Aunque la imagen base ya configura /var/www/vhosts/localhost/html
 
-# Permisos CI4
-RUN chown -R www-data:www-data /var/www/html \
- && chmod -R 775 /var/www/html/writable
+# Exponer los puertos (ya están expuestos en la imagen base, pero se recomienda)
+EXPOSE 80 443 7080
 
-EXPOSE 80
-CMD ["apache2-foreground"]
+# Comando por defecto (la imagen base ya lo tiene)
+CMD ["/usr/local/lsws/bin/litespeed", "-D"]
