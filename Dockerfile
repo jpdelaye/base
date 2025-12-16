@@ -1,7 +1,7 @@
 # Usa la imagen base oficial de OpenLiteSpeed con PHP 8.1
 FROM litespeedtech/openlitespeed:2.0.1-lsphp81
 
-LABEL maintainer="Tu Nombre"
+LABEL maintainer="Mantenedor"
 
 # Instalación de herramientas básicas y dependencias de PHP
 RUN apt-get update && \
