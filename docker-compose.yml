@@ -1,73 +1,73 @@
-version: "3.8"
+version: "3.9"
 
 services:
-  app:
-    build: .
-    restart: unless-stopped
+  web:
+    build:
+      context: ./docker/php
+      dockerfile: Dockerfile
     environment:
-      CI_ENVIRONMENT: production
-
-      # App / dominios
-      APP_PRIMARY_DOMAIN: ${APP_PRIMARY_DOMAIN}
-      APP_ALLOWED_HOSTNAMES: ${APP_ALLOWED_HOSTNAMES}
-
-      # DB
-      DB_HOST: db
-      DB_PORT: 3306
-      DB_NAME: ${DB_NAME}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-
+      TZ: ${TZ:-America/Mexico_City}
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    volumes:
+      - app_data:/var/www/html
+      - ./php/conf.d/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
     depends_on:
       - db
-    networks:
-      - dokploy-network
-    expose:
-      - "80"
-    labels:
-      - "traefik.enable=true"
-      # Si vas a tener MUCHOS dominios: mejor agrégalos en Dokploy > Domains (recomendado).
-      - "traefik.http.routers.ci4.rule=Host(`${APP_PRIMARY_DOMAIN}`)"
-      - "traefik.http.routers.ci4.entrypoints=websecure"
-      - "traefik.http.routers.ci4.tls.certresolver=letsencrypt"
-      - "traefik.http.services.ci4.loadbalancer.server.port=80"
+    restart: unless-stopped
 
   db:
     image: mariadb:11.4
-    restart: unless-stopped
     environment:
+      TZ: ${TZ:-America/Mexico_City}
       MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
       MARIADB_DATABASE: ${DB_NAME}
       MARIADB_USER: ${DB_USER}
       MARIADB_PASSWORD: ${DB_PASSWORD}
     volumes:
       - db_data:/var/lib/mysql
-    networks:
-      - dokploy-network
+    restart: unless-stopped
 
   phpmyadmin:
     image: phpmyadmin:latest
-    restart: unless-stopped
     environment:
+      TZ: ${TZ:-America/Mexico_City}
       PMA_HOST: db
       PMA_PORT: 3306
-      PMA_ARBITRARY: 1
-      UPLOAD_LIMIT: 256M
-    networks:
-      - dokploy-network
-    expose:
-      - "80"
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.pma.rule=Host(`${PMA_DOMAIN}`)"
-      - "traefik.http.routers.pma.entrypoints=websecure"
-      - "traefik.http.routers.pma.tls.certresolver=letsencrypt"
-      - "traefik.http.services.pma.loadbalancer.server.port=80"
+      PMA_ARBITRARY: 0
+      UPLOAD_LIMIT: 512M
+    ports:
+      - "${PMA_PORT:-8081}:80"
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  filemanager:
+    image: filebrowser/filebrowser:latest
+    environment:
+      TZ: ${TZ:-America/Mexico_City}
+      FILEMANAGER_USER: ${FILEMANAGER_USER:-admin}
+      FILEMANAGER_PASS: ${FILEMANAGER_PASS:-admin12345}
+    ports:
+      - "${FILEMANAGER_PORT:-8082}:80"
+    volumes:
+      - app_data:/srv
+      - filebrowser_database:/database
+      - filebrowser_config:/config
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      if [ ! -f /database/filebrowser.db ]; then
+        echo "Initializing File Browser...";
+        filebrowser -d /database/filebrowser.db config init -a 0.0.0.0 -p 80 -r /srv;
+        filebrowser -d /database/filebrowser.db users add "$FILEMANAGER_USER" "$FILEMANAGER_PASS" --perm.admin;
+      fi;
+      exec filebrowser -d /database/filebrowser.db -a 0.0.0.0 -p 80 -r /srv
+    restart: unless-stopped
 
 volumes:
-  db_data: {}
+  app_data:
+  db_data:
+  filebrowser_database:
+  filebrowser_config:
 
-networks:
-  dokploy-network:
-    external: true
 
